@@ -10,20 +10,36 @@ from plotly.subplots import make_subplots
 import warnings
 
 warnings.filterwarnings('ignore')
+
+
 import tensorflow as tf
 from tensorflow.keras.layers import InputLayer
+from tensorflow.keras import mixed_precision
 
-# --------------------------------------------------
-# PATCH: Make tf.keras compatible with Keras-3 models
-# --------------------------------------------------
-_original_from_config = InputLayer.from_config
+# ==================================================
+# PATCH 1: Remove unsupported batch_shape (Keras3 → tf.keras)
+# ==================================================
+_original_inputlayer_from_config = InputLayer.from_config
 
 @classmethod
-def _patched_from_config(cls, config):
-    config.pop("batch_shape", None)  # 🔥 remove incompatible arg
-    return _original_from_config(config)
+def _patched_inputlayer_from_config(cls, config):
+    config.pop("batch_shape", None)
+    return _original_inputlayer_from_config(config)
 
-InputLayer.from_config = _patched_from_config
+InputLayer.from_config = _patched_inputlayer_from_config
+
+# ==================================================
+# PATCH 2: Fix string dtype → Policy (Keras3 → tf.keras)
+# ==================================================
+_original_get_policy = mixed_precision.policy.get_policy
+
+def _patched_get_policy(dtype):
+    if isinstance(dtype, str):
+        return mixed_precision.Policy(dtype)
+    return _original_get_policy(dtype)
+
+mixed_precision.policy.get_policy = _patched_get_policy
+
 
 
 # ==============================
@@ -819,6 +835,7 @@ with col2:
 with col3:
 
     st.caption(f"Last Updated: {datetime.now().strftime('%Y-%m-%d %H:%M')}")
+
 
 
 
