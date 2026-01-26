@@ -211,7 +211,7 @@ def load_model():
     """Load the trained LSTM model."""
     try:
         # Try to load the model
-        model = tf.keras.models.load_model(lstm_risk_model.keras, compile=True)
+        model = tf.keras.models.load_model("lstm_risk_model.keras", compile=True)
         st.sidebar.success("✓ Model loaded successfully")
         return model
     except Exception as e:
@@ -240,7 +240,7 @@ def load_model():
 def load_scaler():
     """Load the feature scaler."""
     try:
-        scaler = joblib.load("feature_scaler.save")
+        scaler = joblib.load("feature_scaler (1).save")
         st.sidebar.success("✓ Scaler loaded successfully")
         return scaler
     except:
@@ -804,4 +804,5 @@ with col2:
 with col3:
 
     st.caption(f"Last Updated: {datetime.now().strftime('%Y-%m-%d %H:%M')}")
+
 
