@@ -235,7 +235,7 @@ def load_model():
         try:
             model = tf.keras.models.load_model(
                 "lstm_risk_model.keras",
-                compile=False
+                compile=False,safe_mode=True,
             )
             st.sidebar.success("✓ Model loaded successfully from .keras")
             return model
