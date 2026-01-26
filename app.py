@@ -10,6 +10,21 @@ from plotly.subplots import make_subplots
 import warnings
 
 warnings.filterwarnings('ignore')
+import tensorflow as tf
+from tensorflow.keras.layers import InputLayer
+
+# --------------------------------------------------
+# PATCH: Make tf.keras compatible with Keras-3 models
+# --------------------------------------------------
+_original_from_config = InputLayer.from_config
+
+@classmethod
+def _patched_from_config(cls, config):
+    config.pop("batch_shape", None)  # 🔥 remove incompatible arg
+    return _original_from_config(config)
+
+InputLayer.from_config = _patched_from_config
+
 
 # ==============================
 # CONFIGURATION
@@ -217,8 +232,6 @@ def load_model():
 
     st.sidebar.success("✓ Model loaded successfully")
     return model
-    st.sidebar.success("🧠 Model object type: " + str(type(model)))
-    st.stop()
 
         # Create a dummy LSTM model with the correct architecture
     model = tf.keras.Sequential([
@@ -806,6 +819,7 @@ with col2:
 with col3:
 
     st.caption(f"Last Updated: {datetime.now().strftime('%Y-%m-%d %H:%M')}")
+
 
 
 
