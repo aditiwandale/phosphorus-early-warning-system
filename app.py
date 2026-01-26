@@ -154,21 +154,48 @@ html, body, [class*="css"] {
 def load_model():
     """Load the LSTM model with fallback to dummy model."""
     try:
-        # Check if model file exists
-        if os.path.exists("lstm_risk_model.keras"):
-            model = tf.keras.models.load_model(
-                "lstm_risk_model.keras",
-                compile=False
-            )
-            st.sidebar.success("✓ Model loaded successfully")
-        else:
-            st.sidebar.warning("⚠️ Model file not found. Using demonstration model.")
+        # Try loading with custom objects to handle Keras 3 compatibility
+        custom_objects = {}
+        
+        # Check different possible model formats
+        model_files_to_try = [
+            "lstm_risk_model.keras",
+            "lstm_risk_model.h5",
+            "model.keras",
+            "model.h5"
+        ]
+        
+        model_loaded = False
+        model = None
+        
+        for model_file in model_files_to_try:
+            if os.path.exists(model_file):
+                try:
+                    st.sidebar.info(f"🔄 Loading model from {model_file}...")
+                    model = tf.keras.models.load_model(
+                        model_file,
+                        custom_objects=custom_objects,
+                        compile=False
+                    )
+                    model_loaded = True
+                    st.sidebar.success(f"✓ Model loaded from {model_file}")
+                    break
+                except Exception as e:
+                    st.sidebar.warning(f"⚠️ Failed to load {model_file}: {str(e)[:100]}...")
+                    continue
+        
+        if not model_loaded:
+            st.sidebar.warning("⚠️ No model file found or could not load. Using demonstration model.")
             model = create_dummy_model()
             
     except Exception as e:
-        st.sidebar.error(f"⚠️ Error loading model: {str(e)}")
+        st.sidebar.error(f"⚠️ Error loading model: {str(e)[:100]}")
         st.sidebar.info("Using demonstration model instead.")
         model = create_dummy_model()
+    
+    # Ensure model is compiled (required for prediction)
+    if not model_loaded:
+        model.compile(optimizer='adam', loss='mse', metrics=['mae'])
     
     return model
 
@@ -766,3 +793,4 @@ with col2:
 
 with col3:
     st.caption(f"Last Updated: {datetime.now().strftime('%Y-%m-%d %H:%M')}")
+
