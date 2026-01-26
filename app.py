@@ -208,15 +208,17 @@ p, li, .stMarkdown, .stText, .stMetric, .stMetric label {
 # ==============================
 @st.cache_resource
 def load_model():
-    """Load the trained LSTM model."""
-    try:
-        # Try to load the model
-        model = tf.keras.models.load_model("lstm_risk_model.keras", compile=True)
-        st.sidebar.success("✓ Model loaded successfully")
-        return model
-    except Exception as e:
-        st.sidebar.warning(f"⚠️ Model file not found: {str(e)[:50]}")
-        st.sidebar.info("Creating a demonstration model...")
+    st.sidebar.info("🔄 Loading LSTM model...")
+
+    model = tf.keras.models.load_model(
+        "lstm_risk_model.keras",
+        compile=False
+    )
+
+    st.sidebar.success("✓ Model loaded successfully")
+    return model
+    st.sidebar.success("🧠 Model object type: " + str(type(model)))
+    st.stop()
 
         # Create a dummy LSTM model with the correct architecture
         model = tf.keras.Sequential([
@@ -804,5 +806,6 @@ with col2:
 with col3:
 
     st.caption(f"Last Updated: {datetime.now().strftime('%Y-%m-%d %H:%M')}")
+
 
 
