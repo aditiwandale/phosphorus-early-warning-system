@@ -211,7 +211,8 @@ def load_model():
     """Load the trained LSTM model."""
     try:
         # Try to load the model
-        model = tf.keras.models.load_model("lstm_risk_model.h5", compile=False)
+        model = tf.keras.models.load_model("lstm_risk_model.keras", compile=False)
+
         st.sidebar.success("✓ Model loaded successfully")
         return model
     except Exception as e:
