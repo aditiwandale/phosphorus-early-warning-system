@@ -211,12 +211,17 @@ def load_model():
     """Load the trained LSTM model."""
     try:
         # Try to load the model
-        model = tf.keras.models.load_model("lstm_risk_model.h5", compile=False)
-        st.sidebar.success("✓ Model loaded successfully")
-        return model
+            model = tf.keras.models.load_model(
+                "lstm_risk_model.keras",
+                compile=False,
+                safe_mode=False,
+                custom_objects={"InputLayer": tf.keras.layers.InputLayer}
+            )
+            st.sidebar.success("✓ Model loaded successfully")
+            return model
     except Exception as e:
-        st.sidebar.warning(f"⚠️ Model file not found: {str(e)[:50]}")
-        st.sidebar.info("Creating a demonstration model...")
+            st.sidebar.warning(f"⚠️ Model file not found: {str(e)[:50]}")
+            st.sidebar.info("Creating a demonstration model...")
 
         # Create a dummy LSTM model with the correct architecture
         model = tf.keras.Sequential([
