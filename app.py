@@ -121,7 +121,7 @@ def load_model():
 def create_demo_model():
     """Create a demonstration model."""
     model = tf.keras.Sequential([
-        tf.keras.layers.Input(shape=(LOOKBACK, len(FEATURE_COLS))),
+        tf.keras.layers.InputLayer(input_shape=(LOOKBACK, len(FEATURE_COLS))),
         tf.keras.layers.LSTM(64, return_sequences=True),
         tf.keras.layers.Dropout(0.2),
         tf.keras.layers.LSTM(32),
@@ -137,27 +137,34 @@ def create_demo_model():
     _ = model.predict(dummy_data, verbose=0)
     
     return model
-
 @st.cache_resource
-def load_scaler():
-    """Load or create scaler."""
+def load_model():
+    """Load or create model."""
     try:
-        if os.path.exists("feature_scaler.save"):
-            scaler = joblib.load("feature_scaler.save")
-            st.sidebar.success("✓ Scaler loaded")
-        elif os.path.exists("scaler.pkl"):
-            scaler = joblib.load("scaler.pkl")
-            st.sidebar.success("✓ Scaler loaded")
-        else:
-            from sklearn.preprocessing import StandardScaler
-            scaler = StandardScaler()
-            st.sidebar.info("📊 Created new scaler")
-    except:
-        from sklearn.preprocessing import StandardScaler
-        scaler = StandardScaler()
-        st.sidebar.info("📊 Created new scaler")
-    
-    return scaler
+        # Try to load the model
+        if os.path.exists("lstm_risk_model.keras"):
+            st.sidebar.info("🔄 Loading LSTM model...")
+            try:
+                # Try with compile=False
+                model = tf.keras.models.load_model(
+                    "lstm_risk_model.keras",
+                    compile=False
+                )
+                # Manually compile if needed
+                if not hasattr(model, 'optimizer') or model.optimizer is None:
+                    model.compile(optimizer='adam', loss='binary_crossentropy')
+                st.sidebar.success("✓ Model loaded successfully")
+                return model
+            except Exception as e:
+                st.sidebar.warning(f"⚠️ Model load failed: {str(e)[:80]}")
+        
+        # If loading fails, create demo model
+        st.sidebar.info("📊 Creating demonstration model")
+        return create_demo_model()
+        
+    except Exception as e:
+        st.sidebar.error(f"⚠️ Error: {str(e)[:80]}")
+        return create_demo_model()
 
 @st.cache_data
 def load_data():
@@ -274,8 +281,16 @@ tab1, tab2 = st.tabs(["📊 Risk Assessment", "📈 Process Trends"])
 # ==============================
 with tab1:
     # Prepare data
-    df_before = df[df["date"] <= pd.Timestamp(selected_datetime)]
+    # Prepare data - fix datetime comparison
+    selected_timestamp = pd.Timestamp(selected_datetime)
+    # Ensure both are timezone-naive
+    selected_timestamp = selected_timestamp.tz_localize(None) if selected_timestamp.tz else selected_timestamp
     
+    if df["date"].dt.tz is not None:
+        df_before = df[df["date"].dt.tz_localize(None) <= selected_timestamp]
+    else:
+        df_before = df[df["date"] <= selected_timestamp]
+        
     if len(df_before) < LOOKBACK:
         st.warning(f"⚠️ Limited data: {len(df_before)}/{LOOKBACK} samples")
         current_lookback = min(LOOKBACK, len(df_before))
@@ -446,3 +461,4 @@ with tab2:
 # ==============================
 st.markdown("---")
 st.caption("© ChemTech 2026 Project | Demonstration System")
+
