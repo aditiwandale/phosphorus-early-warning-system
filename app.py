@@ -211,7 +211,7 @@ def load_model():
     """Load the trained LSTM model."""
     try:
         # Try to load the model
-        model = tf.keras.models.load_model("lstm_risk_model.h5", compile=False)
+        model = tf.keras.models.load_model("lstm_risk_model.keras", compile=True)
         st.sidebar.success("✓ Model loaded successfully")
         return model
     except Exception as e:
@@ -802,4 +802,5 @@ with col2:
     st.caption("Data Source: Agtrup WWTP SCADA System")
 
 with col3:
+
     st.caption(f"Last Updated: {datetime.now().strftime('%Y-%m-%d %H:%M')}")
