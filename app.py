@@ -221,7 +221,7 @@ def load_model():
     st.stop()
 
         # Create a dummy LSTM model with the correct architecture
-        model = tf.keras.Sequential([
+    model = tf.keras.Sequential([
             tf.keras.layers.Input(shape=(LOOKBACK, len(FEATURE_COLS))),
             tf.keras.layers.LSTM(64, return_sequences=True),
             tf.keras.layers.Dropout(0.2),
@@ -232,10 +232,10 @@ def load_model():
         ])
 
         # Build the model with dummy data
-        dummy_input = np.random.randn(1, LOOKBACK, len(FEATURE_COLS)).astype(np.float32)
-        model.predict(dummy_input, verbose=0)
+    dummy_input = np.random.randn(1, LOOKBACK, len(FEATURE_COLS)).astype(np.float32)
+    model.predict(dummy_input, verbose=0)
 
-        return model
+    return model
 
 
 @st.cache_resource
@@ -806,6 +806,7 @@ with col2:
 with col3:
 
     st.caption(f"Last Updated: {datetime.now().strftime('%Y-%m-%d %H:%M')}")
+
 
 
 
