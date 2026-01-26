@@ -117,7 +117,48 @@ def load_model():
     except Exception as e:
         st.sidebar.error(f"⚠️ Model loading error: {str(e)[:80]}")
         return create_demo_model()
-
+@st.cache_resource
+def load_scaler():
+    """Load or create scaler."""
+    try:
+        # Try different possible scaler file names
+        scaler_files = [
+            "feature_scaler.save",
+            "scaler.pkl", 
+            "feature_scaler.pkl",
+            "standard_scaler.save"
+        ]
+        
+        for scaler_file in scaler_files:
+            if os.path.exists(scaler_file):
+                st.sidebar.info(f"🔄 Loading scaler from {scaler_file}...")
+                scaler = joblib.load(scaler_file)
+                st.sidebar.success(f"✓ Scaler loaded from {scaler_file}")
+                return scaler
+        
+        # If no scaler file found, create a new one
+        st.sidebar.warning("⚠️ No scaler file found. Creating new scaler.")
+        from sklearn.preprocessing import StandardScaler
+        scaler = StandardScaler()
+        
+        # Generate dummy data to fit the scaler
+        np.random.seed(42)
+        dummy_data = np.random.randn(1000, len(FEATURE_COLS))
+        scaler.fit(dummy_data)
+        
+        return scaler
+        
+    except Exception as e:
+        st.sidebar.error(f"⚠️ Error loading scaler: {str(e)[:80]}")
+        from sklearn.preprocessing import StandardScaler
+        scaler = StandardScaler()
+        
+        # Fit with dummy data
+        np.random.seed(42)
+        dummy_data = np.random.randn(1000, len(FEATURE_COLS))
+        scaler.fit(dummy_data)
+        
+        return scaler
 def create_demo_model():
     """Create a demonstration model."""
     model = tf.keras.Sequential([
@@ -461,4 +502,5 @@ with tab2:
 # ==============================
 st.markdown("---")
 st.caption("© ChemTech 2026 Project | Demonstration System")
+
 
