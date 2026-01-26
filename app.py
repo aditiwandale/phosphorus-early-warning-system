@@ -252,7 +252,7 @@ def load_model():
                 # Try .pb format (SavedModel)
                 try:
                     model = tf.keras.models.load_model(
-                        "saved_model",
+                        "lstm_risk_model.keras",
                         compile=False
                     )
                     st.sidebar.success("✓ Model loaded successfully from SavedModel")
