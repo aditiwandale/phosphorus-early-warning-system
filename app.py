@@ -1,506 +1,193 @@
 import streamlit as st
-import pandas as pd
 import numpy as np
-import tensorflow as tf
+import pandas as pd
+import torch
+import torch.nn as nn
 import joblib
-from datetime import datetime
-import plotly.graph_objects as go
-import plotly.express as px
-from plotly.subplots import make_subplots
-import warnings
+import matplotlib.pyplot as plt
 import os
+from datetime import datetime, time
 
-warnings.filterwarnings('ignore')
-
-# ==============================
-# CONFIGURATION
-# ==============================
-LOOKBACK = 720
-FEATURE_COLS = [
-    "T1_PO4", "po4_rate", "T1_O2", "IN_Q", "TEMPERATURE",
-    "IN_METAL_Q", "METAL_Q", "MAX_CF", "PROCESSPHASE_INLET", "PROCESSPHASE_OUTLET"
-]
-
-OPERATIONAL_THRESHOLD = 1.5
-REGULATORY_THRESHOLD = 2.0
-
-# ==============================
+# =====================================================
 # PAGE CONFIG
-# ==============================
+# =====================================================
 st.set_page_config(
-    page_title="Phosphorus Early Warning System",
-    page_icon="🚨",
-    layout="wide",
-    initial_sidebar_state="expanded"
+    page_title="WWTP Phosphorus Spike Monitor",
+    layout="wide"
 )
 
-st.markdown("""
-<style>
-.main-header {
-    font-size: 2.3rem;
-    font-weight: 700;
-    color: #F9FAFB;
-    margin-bottom: 0.8rem;
-}
-.sub-header {
-    font-size: 1.35rem;
-    font-weight: 600;
-    color: #E5E7EB;
-    margin-top: 2rem;
-    margin-bottom: 1rem;
-    padding-bottom: 0.4rem;
-    border-bottom: 1px solid #1F2937;
-}
-.metric-card {
-    background-color: #111827;
-    border-radius: 12px;
-    padding: 1.4rem;
-    box-shadow: 0 4px 10px rgba(0, 0, 0, 0.6);
-    border: 1px solid #1F2937;
-    color: #E5E7EB;
-}
-.risk-low { background-color: #064E3B; color: #D1FAE5; padding: 1rem; border-radius: 10px; text-align: center; font-weight: 600; }
-.risk-medium { background-color: #78350F; color: #FEF3C7; padding: 1rem; border-radius: 10px; text-align: center; font-weight: 600; }
-.risk-high { background-color: #7F1D1D; color: #FEE2E2; padding: 1rem; border-radius: 10px; text-align: center; font-weight: 600; }
-</style>
-""", unsafe_allow_html=True)
+st.title("🚨 Phosphorus Spike Early Warning System")
+st.caption("BiLSTM-based risk prediction | 2-minute SCADA data")
 
-# ==============================
-# ROBUST MODEL LOADING
-# ==============================
+# =====================================================
+# LOAD MODEL + CONFIG
+# =====================================================
 @st.cache_resource
 def load_model():
-    """Load model with multiple fallback strategies."""
-    try:
-        # First try to load from .keras file
-        if os.path.exists("lstm_risk_model.keras"):
-            st.sidebar.info("🔄 Attempting to load LSTM model...")
-            
-            # METHOD 1: Try direct load with safe mode
-            try:
-                model = tf.keras.models.load_model(
-                    "lstm_risk_model.keras",
-                    compile=False,
-                    safe_mode=False  # Disable safe mode for compatibility
-                )
-                st.sidebar.success("✓ Model loaded successfully")
-                return model
-            except Exception as e1:
-                st.sidebar.warning(f"Method 1 failed: {str(e1)[:80]}")
-                
-                # METHOD 2: Create model architecture and load weights
-                try:
-                    st.sidebar.info("🔄 Trying alternative loading method...")
-                    # Define the model architecture
-                    model = tf.keras.Sequential([
-                        tf.keras.layers.Input(shape=(LOOKBACK, len(FEATURE_COLS))),
-                        tf.keras.layers.LSTM(64, return_sequences=True),
-                        tf.keras.layers.Dropout(0.2),
-                        tf.keras.layers.LSTM(32),
-                        tf.keras.layers.Dropout(0.2),
-                        tf.keras.layers.Dense(16, activation='relu'),
-                        tf.keras.layers.Dense(1, activation='sigmoid')
-                    ])
-                    
-                    # Try to load weights only
-                    model.load_weights("lstm_risk_model.keras")
-                    model.compile(optimizer='adam', loss='binary_crossentropy')
-                    st.sidebar.success("✓ Model weights loaded successfully")
-                    return model
-                except Exception as e2:
-                    st.sidebar.warning(f"Method 2 failed: {str(e2)[:80]}")
-        
-        # If all loading attempts fail, create demonstration model
-        st.sidebar.warning("⚠️ Using demonstration model")
-        return create_demo_model()
-        
-    except Exception as e:
-        st.sidebar.error(f"⚠️ Model loading error: {str(e)[:80]}")
-        return create_demo_model()
-@st.cache_resource
-def load_scaler():
-    """Load or create scaler."""
-    try:
-        # Try different possible scaler file names
-        scaler_files = [
-            "feature_scaler.save",
-            "scaler.pkl", 
-            "feature_scaler.pkl",
-            "standard_scaler.save"
-        ]
-        
-        for scaler_file in scaler_files:
-            if os.path.exists(scaler_file):
-                st.sidebar.info(f"🔄 Loading scaler from {scaler_file}...")
-                scaler = joblib.load(scaler_file)
-                st.sidebar.success(f"✓ Scaler loaded from {scaler_file}")
-                return scaler
-        
-        # If no scaler file found, create a new one
-        st.sidebar.warning("⚠️ No scaler file found. Creating new scaler.")
-        from sklearn.preprocessing import StandardScaler
-        scaler = StandardScaler()
-        
-        # Generate dummy data to fit the scaler
-        np.random.seed(42)
-        dummy_data = np.random.randn(1000, len(FEATURE_COLS))
-        scaler.fit(dummy_data)
-        
-        return scaler
-        
-    except Exception as e:
-        st.sidebar.error(f"⚠️ Error loading scaler: {str(e)[:80]}")
-        from sklearn.preprocessing import StandardScaler
-        scaler = StandardScaler()
-        
-        # Fit with dummy data
-        np.random.seed(42)
-        dummy_data = np.random.randn(1000, len(FEATURE_COLS))
-        scaler.fit(dummy_data)
-        
-        return scaler
-def create_demo_model():
-    """Create a demonstration model."""
-    model = tf.keras.Sequential([
-        tf.keras.layers.InputLayer(input_shape=(LOOKBACK, len(FEATURE_COLS))),
-        tf.keras.layers.LSTM(64, return_sequences=True),
-        tf.keras.layers.Dropout(0.2),
-        tf.keras.layers.LSTM(32),
-        tf.keras.layers.Dropout(0.2),
-        tf.keras.layers.Dense(16, activation='relu'),
-        tf.keras.layers.Dense(1, activation='sigmoid')
-    ])
-    
-    model.compile(optimizer='adam', loss='binary_crossentropy', metrics=['accuracy'])
-    
-    # Initialize with dummy prediction
-    dummy_data = np.random.randn(1, LOOKBACK, len(FEATURE_COLS)).astype(np.float32)
-    _ = model.predict(dummy_data, verbose=0)
-    
-    return model
-@st.cache_resource
-def load_model():
-    """Load or create model."""
-    try:
-        # Try to load the model
-        if os.path.exists("lstm_risk_model.keras"):
-            st.sidebar.info("🔄 Loading LSTM model...")
-            try:
-                # Try with compile=False
-                model = tf.keras.models.load_model(
-                    "lstm_risk_model.keras",
-                    compile=False
-                )
-                # Manually compile if needed
-                if not hasattr(model, 'optimizer') or model.optimizer is None:
-                    model.compile(optimizer='adam', loss='binary_crossentropy')
-                st.sidebar.success("✓ Model loaded successfully")
-                return model
-            except Exception as e:
-                st.sidebar.warning(f"⚠️ Model load failed: {str(e)[:80]}")
-        
-        # If loading fails, create demo model
-        st.sidebar.info("📊 Creating demonstration model")
-        return create_demo_model()
-        
-    except Exception as e:
-        st.sidebar.error(f"⚠️ Error: {str(e)[:80]}")
-        return create_demo_model()
+    scaler = joblib.load("scaler.pkl")
+    config = joblib.load("model_config.pkl")
 
-@st.cache_data
-def load_data():
-    """Load or generate data."""
-    try:
-        if os.path.exists("scada_with_risk_labels.csv"):
-            df = pd.read_csv("scada_with_risk_labels.csv")
-        elif os.path.exists("data.csv"):
-            df = pd.read_csv("data.csv")
-        else:
-            raise FileNotFoundError("No data file found")
-            
-        if "date" in df.columns:
-            df["date"] = pd.to_datetime(df["date"], errors='coerce')
-            df = df.dropna(subset=['date'])
-            
-        st.sidebar.success(f"✓ Data loaded: {len(df)} rows")
-        return df
-    except:
-        st.sidebar.warning("⚠️ Generating demo data")
-        return generate_demo_data()
+    class DeepBiLSTM(nn.Module):
+        def __init__(self, input_dim):
+            super().__init__()
+            self.lstm = nn.LSTM(
+                input_dim,
+                hidden_size=96,
+                num_layers=2,
+                dropout=0.3,
+                batch_first=True,
+                bidirectional=True
+            )
+            self.norm = nn.LayerNorm(192)
+            self.fc = nn.Sequential(
+                nn.Linear(192, 96),
+                nn.ReLU(),
+                nn.Dropout(0.3),
+                nn.Linear(96, 1)
+            )
+            self.sigmoid = nn.Sigmoid()
 
-def generate_demo_data():
-    """Generate demonstration data."""
-    np.random.seed(42)
-    n_samples = 10000
-    timestamps = pd.date_range(start='2024-01-01', periods=n_samples, freq='2min')
-    
-    data = {
-        'date': timestamps,
-        'T1_PO4': np.clip(0.5 + 0.01 * np.random.randn(n_samples).cumsum(), 0, 3),
-        'po4_rate': np.random.randn(n_samples) * 0.1,
-        'T1_O2': np.clip(0.5 + 0.3 * np.random.randn(n_samples), 0, 2),
-        'IN_Q': np.clip(800 + 200 * np.random.randn(n_samples), 0, 1500),
-        'TEMPERATURE': np.clip(20 + 5 * np.random.randn(n_samples), 10, 30),
-        'IN_METAL_Q': np.clip(40 + 20 * np.random.randn(n_samples), 0, 100),
-        'METAL_Q': np.clip(5 + 10 * np.random.randn(n_samples), 0, 30),
-        'MAX_CF': np.clip(70 + 20 * np.random.randn(n_samples), 40, 100),
-        'PROCESSPHASE_INLET': np.random.choice([1, 2], n_samples),
-        'PROCESSPHASE_OUTLET': np.random.choice([1, 2], n_samples)
-    }
-    
-    df = pd.DataFrame(data)
-    df['po4_rate'] = df['T1_PO4'].diff().fillna(0)
-    return df
+        def forward(self, x):
+            out, _ = self.lstm(x)
+            h = out[:, -1, :]
+            h = self.norm(h)
+            return self.sigmoid(self.fc(h))
 
-# ==============================
-# HELPER FUNCTIONS
-# ==============================
-def get_risk_category(risk_prob):
-    if risk_prob < 0.3:
-        return "LOW", "🟢", "risk-low"
-    elif risk_prob < 0.7:
-        return "MODERATE", "🟡", "risk-medium"
-    else:
-        return "HIGH", "🔴", "risk-high"
+    model = DeepBiLSTM(len(config["feature_cols"]))
+    model.load_state_dict(torch.load("best_model.pth", map_location="cpu"))
+    model.eval()
 
-# ==============================
-# INITIALIZE
-# ==============================
-st.sidebar.markdown("### 📊 System Initialization")
-model = load_model()
-scaler = load_scaler()
-df = load_data()
+    return model, scaler, config
 
-# Fit scaler if needed
-if hasattr(scaler, 'n_features_in_') and scaler.n_features_in_ == 0:
-    scaler.fit(df[FEATURE_COLS].head(1000))
+model, scaler, config = load_model()
+FEATURE_COLS = config["feature_cols"]
+LOOKBACK = config["lookback"]
+THRESHOLD = config["threshold"]
 
-st.sidebar.markdown("---")
+# =====================================================
+# LOAD DATA (LOCAL OR UPLOAD)
+# =====================================================
+st.sidebar.header("📂 Data Source")
 
-# ==============================
-# SIDEBAR CONTROLS
-# ==============================
-st.sidebar.markdown("### 📅 Select Analysis Time")
+DATA_PATH = "wwtp.csv"
 
-if "date" in df.columns:
-    min_date = df["date"].min().date()
-    max_date = df["date"].max().date()
-    default_date = max_date
+if os.path.exists(DATA_PATH):
+    df = pd.read_csv(DATA_PATH)
 else:
-    min_date = datetime(2024, 1, 1).date()
-    max_date = datetime.now().date()
-    default_date = max_date
+    uploaded = st.sidebar.file_uploader("Upload wwtp.csv", type=["csv"])
+    if uploaded is None:
+        st.info("Upload wwtp.csv to continue")
+        st.stop()
+    df = pd.read_csv(uploaded)
 
-selected_date = st.sidebar.date_input("Date", value=default_date)
-selected_time = st.sidebar.time_input("Time", value=datetime.now().time())
-selected_datetime = datetime.combine(selected_date, selected_time)
+# =====================================================
+# DATE HANDLING (SAFE)
+# =====================================================
+df["date"] = pd.to_datetime(df["date"], errors="coerce")
+if df["date"].dt.tz is not None:
+    df["date"] = df["date"].dt.tz_convert(None)
 
-st.sidebar.markdown("---")
-st.sidebar.markdown("### ⚙️ Threshold Settings")
+df = df.sort_values("date").reset_index(drop=True)
 
-operational_threshold = st.sidebar.slider(
-    "Operational Threshold (mg/L)", 0.5, 3.0, OPERATIONAL_THRESHOLD, 0.1
+# =====================================================
+# FEATURE ENGINEERING
+# =====================================================
+df["po4_rate"] = df["T1_PO4"].diff().fillna(0)
+
+missing = [c for c in FEATURE_COLS if c not in df.columns]
+if missing:
+    st.error(f"Missing required columns: {missing}")
+    st.stop()
+
+# =====================================================
+# SIDEBAR — DATE & TIME PICKERS (STREAMLIT-SAFE)
+# =====================================================
+st.sidebar.header("🕒 Time Window")
+
+min_dt = df["date"].iloc[0]
+max_dt = df["date"].iloc[-1]
+
+start_date = st.sidebar.date_input(
+    "Start date",
+    min_value=min_dt.date(),
+    max_value=max_dt.date(),
+    value=min_dt.date()
 )
 
-regulatory_threshold = st.sidebar.slider(
-    "Regulatory Threshold (mg/L)", 1.0, 5.0, REGULATORY_THRESHOLD, 0.1
+start_time = st.sidebar.time_input(
+    "Start time",
+    value=time(0, 0)
 )
 
-st.sidebar.markdown("---")
-st.sidebar.success(f"**Selected:** {selected_datetime.strftime('%Y-%m-%d %H:%M')}")
+end_date = st.sidebar.date_input(
+    "End date",
+    min_value=min_dt.date(),
+    max_value=max_dt.date(),
+    value=max_dt.date()
+)
 
-# ==============================
-# MAIN DASHBOARD
-# ==============================
-st.markdown('<div class="main-header">🚨 Phosphorus Early Warning System</div>', unsafe_allow_html=True)
-st.markdown("Community-centric AI decision support for WWTP operations")
+end_time = st.sidebar.time_input(
+    "End time",
+    value=max_dt.time()
+)
 
-tab1, tab2 = st.tabs(["📊 Risk Assessment", "📈 Process Trends"])
+start_dt = datetime.combine(start_date, start_time)
+end_dt = datetime.combine(end_date, end_time)
 
-# ==============================
-# TAB 1: RISK ASSESSMENT
-# ==============================
-with tab1:
-    # Prepare data
-    # Prepare data - fix datetime comparison
-    selected_timestamp = pd.Timestamp(selected_datetime)
-    # Ensure both are timezone-naive
-    selected_timestamp = selected_timestamp.tz_localize(None) if selected_timestamp.tz else selected_timestamp
-    
-    if df["date"].dt.tz is not None:
-        df_before = df[df["date"].dt.tz_localize(None) <= selected_timestamp]
-    else:
-        df_before = df[df["date"] <= selected_timestamp]
-        
-    if len(df_before) < LOOKBACK:
-        st.warning(f"⚠️ Limited data: {len(df_before)}/{LOOKBACK} samples")
-        current_lookback = min(LOOKBACK, len(df_before))
-        if current_lookback == 0:
-            st.error("No data for selected time")
-            st.stop()
-        window_df = df_before.tail(current_lookback)
-    else:
-        window_df = df_before.tail(LOOKBACK)
-        current_lookback = LOOKBACK
-    
-    # Ensure all columns exist
-    for col in FEATURE_COLS:
-        if col not in window_df.columns:
-            window_df[col] = 0
-    
-    # Scale data
-    try:
-        X_scaled = scaler.transform(window_df[FEATURE_COLS])
-    except:
-        X_scaled = window_df[FEATURE_COLS].values
-    
-    # Make prediction
-    X_input = X_scaled.reshape(1, current_lookback, len(FEATURE_COLS)).astype(np.float32)
-    
-    try:
-        risk_prob = float(model.predict(X_input, verbose=0)[0][0])
-    except:
-        # Simulate risk based on PO4 levels
-        current_po4 = window_df["T1_PO4"].iloc[-1] if len(window_df) > 0 else 0
-        risk_prob = min(current_po4 / 3.0, 1.0)  # Simple linear mapping
-    
-    risk_category, risk_icon, risk_class = get_risk_category(risk_prob)
-    current_po4 = window_df["T1_PO4"].iloc[-1] if len(window_df) > 0 else 0
-    
-    # Display metrics
-    st.markdown('<div class="sub-header">⚠️ Current Risk Assessment</div>', unsafe_allow_html=True)
-    
-    col1, col2, col3, col4 = st.columns(4)
-    
-    with col1:
-        st.markdown('<div class="metric-card">', unsafe_allow_html=True)
-        st.metric("Risk Probability", f"{risk_prob:.1%}")
-        st.markdown('</div>', unsafe_allow_html=True)
-    
-    with col2:
-        st.markdown(f'<div class="{risk_class}">', unsafe_allow_html=True)
-        st.markdown(f"### {risk_icon} {risk_category}")
-        st.markdown('</div>', unsafe_allow_html=True)
-    
-    with col3:
-        st.markdown('<div class="metric-card">', unsafe_allow_html=True)
-        st.metric("Current PO₄", f"{current_po4:.2f} mg/L")
-        st.caption(f"Threshold: {operational_threshold} mg/L")
-        st.markdown('</div>', unsafe_allow_html=True)
-    
-    with col4:
-        st.markdown('<div class="metric-card">', unsafe_allow_html=True)
-        st.metric("Data Samples", f"{current_lookback}")
-        st.caption("Lookback window")
-        st.markdown('</div>', unsafe_allow_html=True)
-    
-    # Gauges
-    st.markdown("---")
-    col1, col2, col3 = st.columns(3)
-    
-    with col1:
-        fig = go.Figure(go.Indicator(
-            mode="gauge+number",
-            value=current_po4,
-            title={"text": "PO₄ Level (mg/L)"},
-            gauge={
-                "axis": {"range": [0, 3]},
-                "bar": {"color": "darkblue"},
-                "steps": [
-                    {"range": [0, operational_threshold], "color": "green"},
-                    {"range": [operational_threshold, regulatory_threshold], "color": "orange"},
-                    {"range": [regulatory_threshold, 3], "color": "red"}
-                ]
-            }
-        ))
-        fig.update_layout(height=250)
-        st.plotly_chart(fig, use_container_width=True)
-    
-    with col2:
-        fig = go.Figure(go.Indicator(
-            mode="gauge+number",
-            value=risk_prob * 100,
-            title={"text": "Risk Probability (%)"},
-            gauge={
-                "axis": {"range": [0, 100]},
-                "bar": {"color": "darkblue"},
-                "steps": [
-                    {"range": [0, 30], "color": "green"},
-                    {"range": [30, 70], "color": "orange"},
-                    {"range": [70, 100], "color": "red"}
-                ]
-            },
-            number={"suffix": "%"}
-        ))
-        fig.update_layout(height=250)
-        st.plotly_chart(fig, use_container_width=True)
-    
-    with col3:
-        if len(window_df) > 30:
-            recent_change = (window_df["T1_PO4"].iloc[-1] - window_df["T1_PO4"].iloc[-30]) * 30
-        else:
-            recent_change = 0
-        
-        fig = go.Figure(go.Indicator(
-            mode="number+delta",
-            value=recent_change,
-            title={"text": "PO₄ Rate (mg/L/hr)"},
-            delta={"reference": 0}
-        ))
-        fig.update_layout(height=250)
-        st.plotly_chart(fig, use_container_width=True)
+if start_dt >= end_dt:
+    st.error("❌ Start datetime must be before end datetime")
+    st.stop()
 
-# ==============================
-# TAB 2: PROCESS TRENDS
-# ==============================
-with tab2:
-    st.markdown('<div class="sub-header">📈 Process Trends</div>', unsafe_allow_html=True)
-    
-    if len(window_df) < 2:
-        st.warning("Not enough data for trends")
-    else:
-        fig = make_subplots(
-            rows=3, cols=1,
-            shared_xaxes=True,
-            subplot_titles=["Phosphate (T1_PO4)", "Oxygen (T1_O2)", "Influent Flow (IN_Q)"]
-        )
-        
-        fig.add_trace(
-            go.Scatter(x=window_df["date"], y=window_df["T1_PO4"], name="PO₄"),
-            row=1, col=1
-        )
-        
-        fig.add_trace(
-            go.Scatter(x=window_df["date"], y=window_df["T1_O2"], name="O₂"),
-            row=2, col=1
-        )
-        
-        fig.add_trace(
-            go.Scatter(x=window_df["date"], y=window_df["IN_Q"], name="Flow"),
-            row=3, col=1
-        )
-        
-        fig.update_layout(height=600, showlegend=True)
-        st.plotly_chart(fig, use_container_width=True)
-        
-        # Additional charts
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            fig = px.line(window_df, x="date", y=["TEMPERATURE", "IN_METAL_Q"],
-                         title="Temperature & Chemical Dose")
-            st.plotly_chart(fig, use_container_width=True)
-        
-        with col2:
-            if "MAX_CF" in window_df.columns:
-                fig = px.line(window_df, x="date", y=["MAX_CF"],
-                             title="Control Factor")
-                st.plotly_chart(fig, use_container_width=True)
+df_win = df[(df["date"] >= start_dt) & (df["date"] <= end_dt)].reset_index(drop=True)
 
-# ==============================
+if len(df_win) <= LOOKBACK:
+    st.warning(
+        f"Need at least {LOOKBACK+1} rows "
+        f"(≈ {(LOOKBACK*2)/60:.1f} hours of data)"
+    )
+    st.stop()
+
+# =====================================================
+# FAST INFERENCE (LAST WINDOW ONLY)
+# =====================================================
+X = df_win[FEATURE_COLS].values
+X_scaled = scaler.transform(X)
+
+seq = X_scaled[-LOOKBACK:]
+seq_tensor = torch.tensor(seq, dtype=torch.float32).unsqueeze(0)
+
+with torch.no_grad():
+    prob = model(seq_tensor).item()
+
+risk_state = "HIGH" if prob > THRESHOLD else "LOW"
+
+# =====================================================
+# CURRENT STATUS
+# =====================================================
+st.subheader("📊 Current Risk Status")
+
+c1, c2, c3 = st.columns(3)
+c1.metric("Risk Probability", f"{prob:.3f}")
+c2.metric("Threshold", f"{THRESHOLD:.2f}")
+c3.metric("Risk State", "🚨 HIGH" if risk_state == "HIGH" else "✅ LOW")
+
+# =====================================================
+# PO₄ TREND (SAFE PLOT)
+# =====================================================
+st.subheader("📈 PO₄ Trend")
+
+fig, ax = plt.subplots(figsize=(10, 4))
+ax.plot(df_win["T1_PO4"].values)
+ax.axhline(1.5, color="red", linestyle="--")
+ax.set_xlabel("Samples (2-min)")
+ax.set_ylabel("PO₄ (mg/L)")
+ax.grid(alpha=0.3)
+st.pyplot(fig)
+
+# =====================================================
 # FOOTER
-# ==============================
-st.markdown("---")
-st.caption("© ChemTech 2026 Project | Demonstration System")
-
-
+# =====================================================
+st.caption(
+    "⚠️ This early-warning system prioritizes recall. "
+    "False alarms are expected in safety-critical WWTP operation."
+)
