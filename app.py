@@ -69,7 +69,7 @@ THRESHOLD = config["threshold"]
 # =====================================================
 st.sidebar.header("📂 Data Source")
 
-DATA_PATH = "wwtp.csv"
+DATA_PATH = "wwtp_training_subset.csv"
 
 if os.path.exists(DATA_PATH):
     df = pd.read_csv(DATA_PATH)
@@ -191,3 +191,4 @@ st.caption(
     "⚠️ This early-warning system prioritizes recall. "
     "False alarms are expected in safety-critical WWTP operation."
 )
+
